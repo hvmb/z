@@ -1,0 +1,1945 @@
+import helper
+import asyncio
+import nest_asyncio
+
+from discord.ext import commands
+from discord import app_commands
+from datetime import datetime
+
+bot = commands.Bot(command_prefix="?", bot_owner=105775345438845341, tree_cls=app_commands.CommandTree, intents=None, help_command=None)
+
+
+@bot.event
+async def on_ready():
+    await bot.tree.sync()
+    print(datetime.today())
+    
+    asyncio.create_task(helper.stats_updater())
+            
+            
+async def initialize():
+    await helper.set_session()
+    
+    await bot.load_extension('reserve')
+    await bot.load_extension('commands')
+    
+    await bot.run(helper.settings['Bot']['Token'], log_handler=None)
+
+
+if __name__ == '__main__':
+    nest_asyncio.apply()
+
+    asyncio.run(initialize())
+import helper
+import asyncio
+import nest_asyncio
+
+from discord.ext import commands
+from discord import app_commands
+
+
+bot = commands.Bot(command_prefix=helper.settings['Bot']['Prefix'], tree_cls=app_commands.CommandTree, intents=None, help_command=None)
+
+
+@bot.event
+async def on_ready():
+    await bot.tree.sync()
+    
+    asyncio.create_task(helper.stats_updater())
+            
+            
+async def initialize():
+    await helper.set_session()
+    
+    await bot.load_extension('reserve')
+    await bot.load_extension('commands')
+    
+    await bot.run(helper.settings['Bot']['Token'], log_handler=None)
+
+
+if __name__ == '__main__':
+    nest_asyncio.apply()
+
+    asyncio.run(initialize())
+import helper
+import discord
+import asyncio
+import exceptions
+
+from views import link
+from discord.ext import commands
+from discord import app_commands
+
+
+class Commands(commands.Cog):
+    def __init__(self, bot) -> None:
+        self.bot = bot
+
+
+    @app_commands.command(name='profile', description='Displays gamertag or XUIDs profile')
+    @app_commands.describe(arg='Gamertag or XUID')
+    @app_commands.guild_only
+    async def _profile(self, interaction: discord.Interaction, arg: str):
+        if helper.settings['Application']['Test mode'] and interaction.user.id != 532576383331860544:
+            return await interaction.response.send_message(':warning: I am currently in **Test Mode**. Please try this command again later!', ephemeral=True)
+
+        await interaction.response.defer()
+
+        if arg.isdigit() and len(arg) > 15:
+            found = []
+            
+        else:
+            found = await helper.grab_xuids(arg)
+
+            if not found:
+                embed = discord.Embed(color=0xff0000)
+                embed.set_author(name=f'Gamertag is invalid!', icon_url='https://th.bing.com/th/id/R.c1ab0eaefe96d3c24dbcd1f706f9b772?rik=8flRJ%2bS8UxeReQ&pid=ImgRaw&r=0')
+
+                return await interaction.edit_original_response(embed=embed)
+            
+            arg = found[0].split('|')[0]
+
+        try:
+            information = await helper.gather_information(arg, options=['gamertag', 'uniqueModernGamertag', 'gamerScore', 'tenure', 'displayPicRaw', 'bio', 'location', 'realName', 'followerCount', 'followingCount', 'linkedAccounts', 'primaryColor', 'presenceText', 'Device'])
+
+        except exceptions.InvalidXUIDError:
+            embed = discord.Embed(color=0xff0000)
+            embed.set_author(name=f'XUID is invalid!', icon_url='https://th.bing.com/th/id/R.c1ab0eaefe96d3c24dbcd1f706f9b772?rik=8flRJ%2bS8UxeReQ&pid=ImgRaw&r=0')
+
+            return await interaction.edit_original_response(embed=embed)
+
+        gamertag = information[0]
+        unique_modern_gamertag = information[1]
+        gamerscore = information[2]
+        tenure = information[3]
+        display_pic_raw = information[4]
+        bio = information[5]
+        location = information[6]
+        real_name = information[7]
+        follower_count = information[8]
+        following_count = information[9]
+        linked_accounts = information[10]
+        primary_color = information[11]
+        presence_text = information[12]
+        device = information[13]
+
+        #if following_count > 0:
+        #    pastebin_url = await helper.generate_friend_list_pastebin(arg)
+
+        if primary_color is None:
+            color = 0x107c10
+        else:
+            color = int(primary_color, 16)
+
+        try:
+            title_history = await helper.get_title_history(arg)
+
+        except exceptions.NoTitleHistoryError:
+            has_played = False
+        else:
+            has_played = True
+
+        content = f'''
+        {f'> **Real name:** ` {real_name} `' if real_name else '> **Real name:** ` Private `'}
+        > **Gamerscore:** ` {gamerscore} `
+        > **Tenure level:** ` {tenure} `
+        > **Followers:** ` {follower_count} `
+        > **Friends:** ` {following_count} `
+        {f'> **Location:** ` {location} `' if location else '> **Location:** ` Private `'}
+        {f'> **Bio:** ` {bio} `' if bio else '> **Bio:** ` Private `'}
+        '''
+
+        embed = discord.Embed(title=f'*{f"{unique_modern_gamertag} ({gamertag})" if gamertag != unique_modern_gamertag else gamertag}{helper.single_quote if gamertag[-1] == "s" else f"{helper.single_quote}s"} Profile*', url=f'https://xboxgamertag.com/search/{gamertag.replace(" ", "-")}', description=content, color=color)
+
+        embed.set_thumbnail(url=display_pic_raw)
+
+        if has_played:
+            embed.add_field(name=f'*First Played ({title_history[1]})*', value=f'` {title_history[2]} ({title_history[0]}) `', inline=False)
+            embed.add_field(name=f'*Last Played ({title_history[4]})*', value=f'` {title_history[5]} ({title_history[3]}) `', inline=False)
+
+        embed.set_footer(text=presence_text if device is None else f'{presence_text} ({device})')
+
+        embeds = [embed]
+
+        if len(found) > 1:
+            versions_embed = discord.Embed(description=':warning: Found multiple versions for this gamertag!', color=0x36393f)
+
+            for combination in found:
+                versions_embed.add_field(name=f'*{combination.split("|")[1]}*', value=f'**XUID:** ` {combination.split("|")[0]} `', inline=False)
+
+            embeds.append(versions_embed)
+
+        if linked_accounts:
+            account_links = []
+
+            #if following_count > 0:
+            #    account_links.append(f'Friend List|{pastebin_url}')
+
+            for index, _ in enumerate(linked_accounts):
+                account_links.append(f'{linked_accounts[index]["networkName"]} ({linked_accounts[index]["displayName"]})|{linked_accounts[index]["deeplink"]}')
+
+            await interaction.edit_original_response(embeds=embeds, view=link.View(account_links))
+
+        else:
+            #if following_count > 0:
+            #    await interaction.edit_original_response(embeds=embeds, view=link.View([f'Friend List|{pastebin_url}']))
+            #else:
+                
+            await interaction.edit_original_response(embeds=embeds)
+
+    
+    @app_commands.command(name='xuid', description='Grabs a gamertags XUID')
+    @app_commands.guild_only
+    async def _xuid(self, interaction: discord.Interaction, gamertag: str):
+        if helper.settings['Application']['Test mode'] and interaction.user.id != 532576383331860544:
+            return await interaction.response.send_message(':warning: I am currently in **Test Mode**. Please try this command again later!', ephemeral=True)
+
+        await interaction.response.defer()
+
+        found = await helper.grab_xuids(gamertag)
+
+        if not found:
+            embed = discord.Embed(color=0xff0000)
+            embed.set_author(name=f'Gamertag is invalid!', icon_url='https://th.bing.com/th/id/R.c1ab0eaefe96d3c24dbcd1f706f9b772?rik=8flRJ%2bS8UxeReQ&pid=ImgRaw&r=0')
+
+            return await interaction.edit_original_response(embed=embed)
+
+        xuid = found[0].split("|")[0]
+
+        information = await helper.gather_information(xuid, options=['gamertag', 'uniqueModernGamertag', 'displayPicRaw', 'primaryColor'])
+
+        gamertag = information[0]
+        unique_modern_gamertag = information[1]
+        display_pic_raw = information[2]
+        primary_color = information[3]
+
+        if primary_color is None:
+            color = 0x107c10
+        else:
+            color = int(primary_color, 16)
+
+        embed = discord.Embed(title=f'*{f"{unique_modern_gamertag} ({gamertag})" if gamertag != unique_modern_gamertag else gamertag}{helper.single_quote if gamertag[-1] == "s" else f"{helper.single_quote}s"} XUID*', color=color)
+
+        embed.set_thumbnail(url=display_pic_raw)
+
+        embed.add_field(name=f'*Hexadecimal*', value=f'` {hex(int(xuid))} `', inline=False)
+        embed.add_field(name=f'*Decimal*', value=f'` {xuid} `', inline=False)
+
+        await interaction.edit_original_response(embed=embed)
+
+            
+    @app_commands.command(name='gamerpic', description='Grabs a gamertag or XUIDs gamerpic')
+    @app_commands.describe(arg='Gamertag or XUID')
+    @app_commands.guild_only
+    async def _gamerpic(self, interaction: discord.Interaction, arg: str):
+        if helper.settings['Application']['Test mode'] and interaction.user.id != 532576383331860544:
+            return await interaction.response.send_message(':warning: I am currently in **Test Mode**. Please try this command again later!', ephemeral=True)
+
+        await interaction.response.defer()
+
+        if arg.isdigit() and len(arg) > 15:
+            pass
+
+        else:
+            found = await helper.grab_xuids(arg)
+
+            if not found:
+                embed = discord.Embed(color=0xff0000)
+                embed.set_author(name=f'Gamertag is invalid!', icon_url='https://th.bing.com/th/id/R.c1ab0eaefe96d3c24dbcd1f706f9b772?rik=8flRJ%2bS8UxeReQ&pid=ImgRaw&r=0')
+
+                return await interaction.edit_original_response(embed=embed)
+            
+            arg = found[0].split('|')[0]
+
+        try:
+            information = await helper.gather_information(arg, options=['gamertag', 'uniqueModernGamertag', 'displayPicRaw', 'primaryColor'])
+
+        except exceptions.InvalidXUIDError:
+            embed = discord.Embed(color=0xff0000)
+            embed.set_author(name=f'XUID is invalid!', icon_url='https://th.bing.com/th/id/R.c1ab0eaefe96d3c24dbcd1f706f9b772?rik=8flRJ%2bS8UxeReQ&pid=ImgRaw&r=0')
+
+            return await interaction.edit_original_response(embed=embed)
+
+        gamertag = information[0]
+        unique_modern_gamertag = information[1]
+        display_pic_raw = information[2]
+        primary_color = information[3]
+
+        if primary_color is None:
+            color = 0x107c10
+        else:
+            color = int(primary_color, 16)
+
+        embed = discord.Embed(title=f'*{f"{unique_modern_gamertag} ({gamertag})" if gamertag != unique_modern_gamertag else gamertag}{helper.single_quote if gamertag[-1] == "s" else f"{helper.single_quote}s"} Gamerpic*', url=display_pic_raw, color=color)
+
+        embed.set_image(url=display_pic_raw)
+
+        await interaction.edit_original_response(embed=embed)
+
+ 
+async def setup(bot):
+    commands = Commands(bot)
+
+    asyncio.create_task(helper.xbl2_token_updater())
+
+    for user_token in [user_token.strip() for user_token in open('user_tokens.txt').readlines()]:
+        asyncio.create_task(helper.xbl3_token_updater(user_token))
+
+    await bot.add_cog(commands)
+class InvalidXUIDError(Exception):
+    pass
+
+class NoTitleHistoryError(Exception):
+    pass
+
+class NoAccountsInStockError(Exception):
+    pass
+import json
+import asyncio
+import objects
+import aiohttp
+import requests
+import datetime
+import itertools
+import exceptions
+
+from random import random
+from urllib.parse import urlencode, unquote
+
+
+index, single_quote = -1, "'"
+xbl2_token, xbl3_tokens = None, []
+aiohttp_session, requests_session = None, requests.Session()
+
+
+with open('settings.json') as _file:
+    settings = json.load(_file)
+
+
+def xbl3_token() -> any:
+    global index
+
+    index += 1
+
+    if index >= len(xbl3_tokens):
+        index = 0
+
+    return xbl3_tokens[index]
+
+
+def format_device(device: str) -> str:
+    if device == 'Scarlett':
+        formatted_device = 'Xbox Series S|X'
+
+    elif device == 'XboxOne':
+        formatted_device = 'Xbox One'
+
+    elif device == 'Xbox360':
+        formatted_device = 'Xbox 360'
+
+    elif device == 'WindowsOneCore' or 'PC':
+        formatted_device = 'PC'
+
+    return formatted_device
+
+
+async def xbl3_token_updater(user_token: str) -> None:
+    while True:
+        token = await grab_token(user_token, created=True)
+
+        if token is None:
+            break
+
+        xbl3_tokens.append(token)
+
+        await asyncio.sleep(57300)
+
+        xbl3_tokens.remove(token)
+
+
+
+async def set_session():
+    global aiohttp_session
+
+    if aiohttp_session is not None:
+        await aiohttp_session.close()
+    
+    aiohttp_session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False))
+
+
+async def grab_xuids(gamertag: str) -> list:
+    combinations, found = generate_combinations(gamertag), []
+
+    await asyncio.gather(*[find_xuids(combination, found) for combination in combinations])
+
+    xuids = []
+
+    for xuid in found:
+        if xuid not in xuids:
+            xuids.append(xuid)
+
+    return xuids
+
+
+async def grab_user_token(email: str, password: str) -> str:
+    encoding = unquote(urlencode({
+		'client_id': '0000000048093EE3',
+		'redirect_uri': 'https://login.live.com/oauth20_desktop.srf',
+		'response_type': 'token',
+		'display': 'touch',
+		'scope': 'service::user.auth.xboxlive.com::MBI_SSL',
+		'locale': 'en'
+	}))
+    
+    response = requests_session.get('https://login.live.com/oauth20_authorize.srf?' + encoding)
+    
+    sft_tag, url_post = response.text.split('sFTTag:\'')[1].split('value="')[1].split('"/>')[0], response.text.split('urlPost:\'')[1].split('\'')[0]
+    
+    payload = {'login': email, 'passwd': password, 'PPFT': sft_tag}
+    
+    response = requests_session.post(url_post, data=payload)
+    
+    payload = {
+		'RelyingParty': 'http://auth.xboxlive.com',
+		'TokenType': 'JWT',
+		'Properties': {
+		    'AuthMethod': 'RPS',
+		    'SiteName': 'user.auth.xboxlive.com',
+		    'RpsTicket': response.url.split('access_token=')[1].split('&token_type=')[0]
+		}
+	}
+	
+    response = requests_session.post('https://user.auth.xboxlive.com/user/authenticate', json=payload)
+    
+    data = response.json()
+    
+    return data['Token']
+
+
+async def grab_token(user_token: str, created: bool = False) -> None:
+    payload = {
+        'RelyingParty': 'http://xboxlive.com' if created else 'http://accounts.xboxlive.com',
+        'TokenType': 'JWT',
+        'Properties': {
+            'UserTokens': [user_token],
+            'SandboxId': 'RETAIL'
+        }
+    }
+
+    async with aiohttp_session.post('https://20.69.107.178:443/xsts/authorize', json=payload) as response:
+        if response.status == 200:
+            data = await response.json()
+
+            token, uhs = data['Token'], data['DisplayClaims']['xui'][0]['uhs']
+
+            return objects.Token(token, uhs, user_token)
+
+        else:
+            return None
+
+
+def remove_token(token) -> None:
+    user_tokens = [user_token.strip() for user_token in open('user_tokens.txt').readlines()]
+
+    with open('user_tokens.txt', 'w') as _file:
+        _file.write('\n'.join(user_token for user_token in user_tokens if user_token != token.user_token))
+
+    xbl3_tokens.remove(token)
+
+
+def generate_combinations(gamertag: str) -> list:
+    fixed_gamertag = gamertag.replace(' ', '')
+
+    binary = itertools.product(['', ' '], repeat=len(fixed_gamertag) - 1)
+    zipped_binary = (itertools.zip_longest(fixed_gamertag, combination, fillvalue='') for combination in binary)
+
+    combinations = []
+
+    for combination in zipped_binary:
+        chain = ''.join(itertools.chain.from_iterable(combination))
+
+        if len(chain) <= 15:
+            combinations.append(''.join(character if random()>.5 else character.upper() for character in chain))
+
+    return combinations
+
+
+async def get_title_history(xuid: str):
+    token = xbl3_token()
+
+    headers = {'Authorization': f'XBL3.0 x={token.uhs};{token.token}', 'X-XBL-Contract-Version': '2', 'Accept-Language': 'en-CA, en-GB'}
+
+    async with aiohttp_session.get(f'https://20.80.190.164:443/users/xuid({xuid})/titles/titleHistory/decoration/TitleHistory', headers=headers) as response:
+        if response.status == 200:
+            data = await response.json()
+
+            try:
+                try:
+                    first_time_played = datetime.strptime(data['titles'][-1]['titleHistory']['lastTimePlayed'], '%Y-%m-%dT%H:%M:%SZ')
+                except:
+                    first_time_played = datetime.strptime(data['titles'][-1]['titleHistory']['lastTimePlayed'].split('.')[0], '%Y-%m-%dT%H:%M:%S')
+
+                first_title_name, first_device = format_device(data['titles'][-1]['devices'][0]), data['titles'][-1]['name']
+
+                try:
+                    last_time_played = datetime.strptime(data['titles'][0]['titleHistory']['lastTimePlayed'], '%Y-%m-%dT%H:%M:%SZ')
+                except:
+                    last_time_played = datetime.strptime(data['titles'][0]['titleHistory']['lastTimePlayed'].split('.')[0], '%Y-%m-%dT%H:%M:%S')
+
+                last_title_name, second_device = format_device(data['titles'][0]['devices'][0]), data['titles'][0]['name']
+
+                has_played = True
+
+            except:
+                has_played = False
+
+        elif response.status == 401:
+            remove_token(token)
+
+            return await get_title_history(xuid)
+
+    if has_played:
+        return first_title_name, first_time_played, first_device, last_title_name, last_time_played, second_device
+
+    else:
+        raise exceptions.NoTitleHistoryError(f'XUID: {xuid} has no title history!')
+ 
+
+async def gather_information(xuid: str, options: list):
+    token = xbl3_token()
+
+    headers = {'Authorization': f'XBL3.0 x={token.uhs};{token.token}', 'X-XBL-Contract-Version': '5', 'Accept-Language': 'en-CA, en-GB'}
+
+    async with aiohttp_session.get(f'https://20.187.45.173:443/users/me/people/xuids({xuid})/decoration/detail,preferredColor,presenceDetail', headers=headers) as response:
+        if response.status == 200:
+            data = await response.json()
+
+            information = []
+
+            if 'gamertag' in options:
+                information.append(data['people'][0]['gamertag'])
+
+            if 'uniqueModernGamertag' in options:
+                information.append(data['people'][0]['uniqueModernGamertag'])
+
+            if 'gamerScore' in options:
+                information.append(data['people'][0]['gamerScore'])
+
+            if 'tenure' in options:
+                information.append(data['people'][0]['detail']['tenure'])
+
+            if 'displayPicRaw' in options:
+                information.append(data['people'][0]['displayPicRaw'].replace('&mode=Padding', ''))
+
+            if 'bio' in options:
+                information.append(data['people'][0]['detail']['bio'])
+
+            if 'location' in options:
+                information.append(data['people'][0]['detail']['location'])
+
+            if 'realName' in options:
+                information.append(data['people'][0]['realName'])
+
+            if 'followerCount' in options:
+                information.append(data['people'][0]['detail']['followerCount'])
+
+            if 'followingCount' in options:
+                information.append(data['people'][0]['detail']['followingCount'])
+
+            if 'linkedAccounts' in options:
+                information.append(data['people'][0]['linkedAccounts'])
+
+            if 'primaryColor' in options:
+                information.append(data['people'][0]['preferredColor']['primaryColor'])
+
+            if 'presenceText' in options:
+                information.append(data['people'][0]['presenceText'])
+
+            if 'Device' in options:
+                try:
+                    information.append(format_device(data['people'][0]['presenceDetails'][0]['Device']))
+                except:
+                    information.append(None)
+
+            return information
+
+        elif response.status == 400:
+            raise exceptions.InvalidXUIDError(f'XUID: {xuid} is invalid!')
+
+        elif response.status == 401:
+            remove_token(token)
+
+            await gather_information(xuid, options)
+
+
+async def stats_updater():
+    while True:
+        balance = 5
+
+        print(f'[Stats Updater] XBL3.0 tokens: {len(xbl3_tokens) * 1:,}', end='\r', flush=True)
+
+        await asyncio.sleep(settings['Application']['Stats updater delay'])
+
+
+async def find_xuids(gamertag: str, found: list) -> None:
+    async with aiohttp_session.get(f'https://20.69.172.119:443/users/gt({gamertag})/profile/settings?settings=Gamertag', headers={'Authorization': xbl2_token, 'X-XBL-Contract-Version': '2'}) as response:
+        if response.status == 200:
+            data = await response.json()
+
+            gamertag_found_with_services, xuid_found_with_services = data['profileUsers'][0]['settings'][0]['value'], int(data['profileUsers'][0]['id'])
+
+            if gamertag.replace(' ', '').lower() == gamertag_found_with_services.replace(' ', '').lower():
+                found.append(f'{xuid_found_with_services}|{gamertag_found_with_services}')
+
+        else:
+            xuid_found_with_services = None
+
+    token = xbl3_token()
+
+    headers = {'Authorization': f'XBL3.0 x={token.uhs};{token.token}', 'X-XBL-Contract-Version': '5', 'Accept-Language': 'en-CA, en-GB'}
+        
+    async with aiohttp_session.get(f'https://20.187.45.173:443/users/me/people/search/decoration/detail?q={gamertag.replace(" ", "%2520")}&maxItems=10', headers=headers) as response:
+        if response.status == 200:
+            data = await response.json()
+
+            for index, _ in enumerate(data['people']):
+                gamertag_found_with_peoplehub, xuid_found_with_peoplehub = data['people'][index]['gamertag'], int(data['people'][index]['xuid'])
+
+                if gamertag.replace(' ', '').lower() == gamertag_found_with_peoplehub.replace(' ', '').lower() and xuid_found_with_peoplehub != xuid_found_with_services:
+                    found.append(f'{xuid_found_with_peoplehub}|{gamertag_found_with_peoplehub}')
+
+        elif response.status == 401:
+            remove_token(token)
+            
+            await find_xuids(gamertag, found)
+
+
+async def convert_user_token(user_token: str) -> None:
+    token = await grab_token(user_token)
+
+    payload = {
+        'dateOfBirth': '2000-01-01T00:00:00.0000000',
+        'email': '',
+        'firstName': '',
+        'gamerTag': '',
+        'gamerTagChangeReason': None,
+        'homeAddressInfo': {
+            'city': None,
+            'country': 'US',
+            'postalCode': None,
+            'state': None,
+            'street1': None,
+            'street2': None
+        },
+        'homeConsole': None,
+        'imageUrl': '',
+        'isAdult': True,
+        'lastName': '',
+        'legalCountry': 'US',
+        'locale': 'en-US',
+        'midasConsole': None,
+        'msftOptin': True,
+        'ownerHash': None,
+        'ownerXuid': None,
+        'partnerOptin': True,
+        'requirePasskeyForPurchase': False,
+        'requirePasskeyForSignIn': False,
+        'subscriptionEntitlementInfo': None,
+        'touAcceptanceDate': '2000-01-01T00:00:00.0000000',
+        'userHash': token.uhs,
+        'userKey': None,
+        'userXuid': '216258806147975844'
+    }
+
+    async with aiohttp_session.post('https://accountstroubleshooter.xboxlive.com/users/current/profile', headers={'Authorization': f'XBL3.0 x={token.uhs};{token.token}', 'X-XBL-Contract-Version': '4'}, json=payload) as response:
+        return response.status
+
+
+async def xbl2_token_updater():
+    global xbl2_token
+    
+    while True:
+        with requests.Session() as session:
+            try:
+                encoded_url = urlencode({
+		            'client_id': '0000000048093EE3',
+		            'redirect_uri': 'https://login.live.com/oauth20_desktop.srf',
+		            'response_type': 'token',
+		            'display': 'touch',
+		            'scope': 'service::live.xbox.com::MBI_SSL',
+		            'locale': 'en'
+		        })
+
+                response = session.get('https://login.live.com:443/oauth20_authorize.srf?' + encoded_url)
+
+                sft_tag, url_post = response.text.split('sFTTag:\'')[1].split('value="')[1].split('"/>')[0], response.text.split('urlPost:\'')[1].split('\'')[0]
+
+                payload = {'login': settings['Xbox account (Format: Email|Password)'].split('|')[0], 'passwd': settings['Xbox account (Format: Email|Password)'].split('|')[1], 'PPFT': sft_tag}
+
+                response = session.post(url_post, data=payload)
+
+                access_token = response.url.split('access_token=')[1].split('&token_type=')[0]
+
+                headers = {'Authorization': f'WLID1.0 t={access_token}', 'Content-Type': 'application/soap+xml; charset=utf-8'}
+
+                payload = '''
+		        <s:Envelope
+	                xmlns:s='http://www.w3.org/2003/05/soap-envelope'
+	                xmlns:a='http://www.w3.org/2005/08/addressing'>
+	                <s:Header>
+		    			<a:Action s:mustUnderstand='1'>http://docs.oasis-open.org/ws-sx/ws-trust/200512/RST/Issue</a:Action>
+		    			<a:MessageID>urn:uuid:2bd42a2f-8999-45a7-83f2-f0aab2d2a117</a:MessageID>
+		    			<a:ReplyTo>
+		    				<a:Address>http://www.w3.org/2005/08/addressing/anonymous</a:Address>
+		    			</a:ReplyTo>
+		    			<a:To s:mustUnderstand='1'>http://activeauth.xboxlive.com//XSts/xsts.svc/IWSTrust13</a:To>
+		    		</s:Header>
+		    		<s:Body>
+		    			<trust:RequestSecurityToken
+		    				xmlns:trust='http://docs.oasis-open.org/ws-sx/ws-trust/200512'>
+		    				<wsp:AppliesTo
+		    					xmlns:wsp='http://schemas.xmlsoap.org/ws/2004/09/policy'>
+		    					<EndpointReference
+		    						xmlns='http://www.w3.org/2005/08/addressing'>
+		    						<Address>http://xboxlive.com</Address>
+		    					</EndpointReference>
+		    				</wsp:AppliesTo>
+		    				<trust:KeyType>http://docs.oasis-open.org/ws-sx/ws-trust/200512/Bearer</trust:KeyType>
+		    				<trust:RequestType>http://docs.oasis-open.org/ws-sx/ws-trust/200512/Issue</trust:RequestType>
+		    				<trust:TokenType>http://docs.oasis-open.org/wss/oasis-wss-saml-token-profile-1.1#SAMLV2.0</trust:TokenType>
+		    			</trust:RequestSecurityToken>
+		    		</s:Body>
+		    	</s:Envelope>
+		        '''
+
+                response = session.post('https://activeauth.xboxlive.com:443/XSts/xsts.svc/IWSTrust13', headers=headers, data=payload)
+
+                security_token = str(response.content).split('</e:EncryptionMethod><KeyInfo><o:SecurityTokenReference')[1].split('</trust:RequestedSecurityToken><trust:R')[0]
+
+                xbl2_token = f'XBL2.0 x=<EncryptedAssertion xmlns="urn:oasis:names:tc:SAML:2.0:assertion"><xenc:EncryptedData Type="http://www.w3.org/2001/04/xmlenc#Element" xmlns:xenc="http://www.w3.org/2001/04/xmlenc#"><xenc:EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#aes256-cbc"/><KeyInfo xmlns="http://www.w3.org/2000/09/xmldsig#"><e:EncryptedKey xmlns:e="http://www.w3.org/2001/04/xmlenc#"><e:EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p"><DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/></e:EncryptionMethod><KeyInfo><o:SecurityTokenReference{security_token}'
+
+                await asyncio.sleep(14100)
+
+            except:
+                pass
+import helper
+import asyncio
+
+
+class Account:
+    def __init__(self, email: str, password: str) -> None:
+        self.email, self.password = email, password
+
+
+class Token:
+    def __init__(self, token: str, uhs: str, user_token: str) -> None:
+        self.token, self.uhs, self.user_token = token, uhs, user_token
+
+
+class Stats:
+    def __init__(self, gamertag: str, user_id: int) -> None:
+        self.combinations = helper.generate_combinations(gamertag)
+
+        self.running, self.reserved = True, False
+
+        self.attempts, self.rl, self.rs = 0, 0, 0
+
+        self.user_id = user_id
+
+        self.index = -1
+
+
+    def current_combination(self) -> any:
+        self.index += 1
+        if self.index >= len(self.combinations):
+            self.index = 0
+
+        return self.combinations[self.index]
+        
+
+    async def calculate_rs(self) -> None:
+        while self.running:
+            before = self.attempts
+            await asyncio.sleep(1)
+            self.rs = self.attempts - before
+import json
+import helper
+import objects
+import discord
+import asyncio
+import simplejson
+
+from datetime import datetime
+from discord.ext import commands
+from discord import app_commands
+
+
+class Reserve(commands.Cog):
+    def __init__(self, bot) -> None:
+        self.sessions = []
+        self.bot = bot
+
+
+    @staticmethod
+    def check_if_plan_expired(user_id: int):
+        with open('purchases.json', 'r') as _file:
+            purchases = json.load(_file)
+
+        for index, _ in enumerate(purchases):
+            if user_id == purchases[index]['User ID']:
+                expiry_date, today = datetime.strptime(purchases[index]['Expiry date'], '%Y-%m-%d %H:%M:%S.%f'), datetime.today()
+
+                if expiry_date.date() <= today.date():
+                    return True
+
+
+    async def update_embed(self, interaction: discord.Interaction, information: str, reservation_id: str, stats: objects.Stats) -> None:
+        gamertag = information[0]
+        display_pic_raw = information[1]
+        primary_color = information[2]
+
+        if primary_color is None:
+            color = 0x107c10
+        else:
+            color = int(primary_color, 16)
+
+        while stats.running:
+            if stats.reserved:
+                await interaction.edit_original_response(content=f'**{gamertag}** has been reserved :white_check_mark:')
+
+                stats.running = False
+
+                break
+
+            embed = discord.Embed(title=f'Target: {gamertag}', url=f'https://xboxgamertag.com/search/{gamertag.replace(" ", "-")}', color=color)
+
+            embed.set_thumbnail(url=display_pic_raw)
+
+            embed.add_field(name='*Attempts*', value=f'` {stats.attempts}/{helper.settings["Reserve"]["Max attempts"]} `')
+            embed.add_field(name='*Rate limits*', value=f'` {stats.rl} `')
+            embed.add_field(name='*Requests per second*', value=f'` {stats.rs} `')
+
+            embed.set_footer(text=f'Reservation ID: {reservation_id}')
+
+            await interaction.edit_original_response(embed=embed)
+
+            await asyncio.sleep(0.5)
+
+
+    async def reserve(self, reservation_id: str, stats: objects.Stats) -> None:
+        token = helper.xbl3_token()
+
+        headers = {'Authorization': f'XBL3.0 x={token.uhs};{token.token}', 'X-XBL-Contract-Version': '1'}
+        payload = {'classicGamertag': stats.current_combination(), 'reservationId': f'{reservation_id}', 'targetGamertagFields': 'classicGamertag'}
+
+        async with helper.aiohttp_session.post('https://20.112.101.38:443/gamertags/reserve', headers=headers, json=payload) as response:
+            if response.status == 409:
+                stats.attempts += 1
+
+            elif response.status == 200:
+                stats.reserved = True
+
+            elif response.status == 429:
+                stats.rl += 1
+
+
+    @app_commands.command(name='reserve', description='Attempts to reserve a gamertag to an XUID')
+    @app_commands.describe(target='Target', reservation_id='XUID to reserve to')
+    async def _reserve(self, interaction: discord.Interaction, target: str, reservation_id: str):
+        if helper.settings['Application']['Test mode'] and interaction.user.id != 532576383331860544:
+            return await interaction.response.send_message(':warning: I am currently in **Test Mode**. Please try this command again later!', ephemeral=True)
+
+        with open('purchases.json', 'r') as _file:
+            purchases = json.load(_file)
+
+        user_id = interaction.user.id
+
+        if user_id not in [purchases[index]['User ID'] for index, _ in enumerate(purchases)]:
+            return await interaction.response.send_message(':warning: This feature is paid only. PM <@1057753454388453416> to purchase!')
+
+        expired = self.check_if_plan_expired(user_id)
+
+        if expired:
+            return await interaction.response.send_message(f':warning: <@{user_id}> your plan has expired! If you\'d like to renew it, PM <@532576383331860544>.', ephemeral=True)
+
+        max_sessions, max_attempts = helper.settings['Reserve']['Max sessions'], helper.settings['Reserve']['Max attempts']
+
+        stats = objects.Stats(target, user_id)
+
+        if len(self.sessions) + 1 <= max_sessions:
+            self.sessions.append(stats)
+
+        else:
+            return await interaction.response.send_message(f':warning: All sessions occupied! ({len(self.sessions)}/{max_sessions})', ephemeral=True)
+
+        await interaction.response.defer(ephemeral=True)
+
+        found = await helper.grab_xuids(target)
+
+        if not found:
+            stats.running = False
+            
+            self.sessions.remove(stats)
+
+            embed = discord.Embed(color=0xff0000)
+            embed.set_author(name=f'Target is invalid!', icon_url='https://th.bing.com/th/id/R.c1ab0eaefe96d3c24dbcd1f706f9b772?rik=8flRJ%2bS8UxeReQ&pid=ImgRaw&r=0')
+
+            return await interaction.edit_original_response(embed=embed)
+
+        xuid = found[0].split('|')[0]
+
+        information = await helper.gather_information(xuid, options=['gamertag', 'displayPicRaw', 'primaryColor'])
+
+        asyncio.create_task(self.update_embed(interaction, information, reservation_id, stats)), asyncio.create_task(stats.calculate_rs())
+
+        while stats.running:
+            if stats.attempts >= max_attempts or stats.rl >= max_attempts:
+                stats.running = False
+
+            asyncio.create_task(self.reserve(reservation_id, stats))
+
+            await asyncio.sleep(helper.settings['Reserve']['Delay'])
+
+        self.sessions.remove(stats)
+
+
+    @commands.command()
+    @commands.is_owner()
+    async def sessions(self, ctx):
+        sessions = []
+
+        for index, session in enumerate(self.sessions):
+            sessions.append(f'**{index + 1}.** <@{session.user_id}> ` (Target: {session.combinations[0]}) `')
+
+        embed = discord.Embed(title='Sessions', description='\n'.join(sessions), color=0x107c10)
+        
+        embed.set_footer(text=f'{len(sessions)}/{helper.settings["Reserve"]["Max sessions"]} Occupied')
+
+        await ctx.send(embed=embed)
+
+
+    @commands.command()
+    @commands.is_owner()
+    async def auth(self, ctx, user_id: int, days: int, is_reseller: bool = False):
+        with open('purchases.json', 'r') as _file:
+            purchases = json.load(_file)
+
+        if any(purchases[index]['User ID'] == user_id for index, _ in enumerate(purchases)):
+            return await ctx.reply(f':warning: **{user_id}** already has a plan!')
+
+        purchase_date = datetime.today()
+        expiry_date = purchase_date + relativedelta(days=days)
+
+        purchases.append({
+            "User ID": user_id,
+            "Purchase date": str(purchase_date),
+            "Expiry date": str(expiry_date),
+            "Is reseller": is_reseller
+        })
+
+        with open('purchases.json', 'w+') as _file:
+            _file.write(simplejson.dumps(purchases, indent=4))
+
+        await ctx.reply(f':white_check_mark:')
+
+
+async def setup(bot):
+    reserve = Reserve(bot)
+    
+    await bot.add_cog(reserve)
+import helper
+import discord
+import asyncio
+import exceptions
+
+from views import link
+from discord.ext import commands
+from discord import app_commands
+
+
+class Commands(commands.Cog):
+    def __init__(self, bot) -> None:
+        self.bot = bot
+
+
+    @app_commands.command(name='profile', description='Displays gamertag or XUIDs profile')
+    @app_commands.describe(arg='Gamertag or XUID')
+    @app_commands.guild_only
+    async def _profile(self, interaction: discord.Interaction, arg: str):
+        if helper.settings['Application']['Test mode'] and interaction.user.id != 1057753454388453416:
+            return await interaction.response.send_message(':warning: I am currently in **Test Mode**. Please try this command again later!', ephemeral=True)
+
+        await interaction.response.defer()
+
+        if arg.isdigit() and len(arg) > 15:
+            found = []
+            
+        else:
+            found = await helper.grab_xuids(arg)
+
+            if not found:
+                embed = discord.Embed(color=0xff0000)
+                embed.set_author(name=f'Gamertag is invalid!', icon_url='https://th.bing.com/th/id/R.c1ab0eaefe96d3c24dbcd1f706f9b772?rik=8flRJ%2bS8UxeReQ&pid=ImgRaw&r=0')
+
+                return await interaction.edit_original_response(embed=embed)
+            
+            arg = found[0].split('|')[0]
+
+        try:
+            information = await helper.gather_information(arg, options=['gamertag', 'uniqueModernGamertag', 'gamerScore', 'tenure', 'displayPicRaw', 'bio', 'location', 'realName', 'followerCount', 'followingCount', 'linkedAccounts', 'primaryColor', 'presenceText', 'Device'])
+
+        except exceptions.InvalidXUIDError:
+            embed = discord.Embed(color=0xff0000)
+            embed.set_author(name=f'XUID is invalid!', icon_url='https://th.bing.com/th/id/R.c1ab0eaefe96d3c24dbcd1f706f9b772?rik=8flRJ%2bS8UxeReQ&pid=ImgRaw&r=0')
+
+            return await interaction.edit_original_response(embed=embed)
+
+        gamertag = information[0]
+        unique_modern_gamertag = information[1]
+        gamerscore = information[2]
+        tenure = information[3]
+        display_pic_raw = information[4]
+        bio = information[5]
+        location = information[6]
+        real_name = information[7]
+        follower_count = information[8]
+        following_count = information[9]
+        linked_accounts = information[10]
+        primary_color = information[11]
+        presence_text = information[12]
+        device = information[13]
+
+        #if following_count > 0:
+        #    pastebin_url = await helper.generate_friend_list_pastebin(arg)
+
+        if primary_color is None:
+            color = 0x107c10
+        else:
+            color = int(primary_color, 16)
+
+        try:
+            title_history = await helper.get_title_history(arg)
+
+        except exceptions.NoTitleHistoryError:
+            has_played = False
+        else:
+            has_played = True
+
+        content = f'''
+        {f'> **Real name:** ` {real_name} `' if real_name else '> **Real name:** ` Private `'}
+        > **Gamerscore:** ` {gamerscore} `
+        > **Tenure level:** ` {tenure} `
+        > **Followers:** ` {follower_count} `
+        > **Friends:** ` {following_count} `
+        {f'> **Location:** ` {location} `' if location else '> **Location:** ` Private `'}
+        {f'> **Bio:** ` {bio} `' if bio else '> **Bio:** ` Private `'}
+        '''
+
+        embed = discord.Embed(title=f'*{f"{unique_modern_gamertag} ({gamertag})" if gamertag != unique_modern_gamertag else gamertag}{helper.single_quote if gamertag[-1] == "s" else f"{helper.single_quote}s"} Profile*', url=f'https://xboxgamertag.com/search/{gamertag.replace(" ", "-")}', description=content, color=color)
+
+        embed.set_thumbnail(url=display_pic_raw)
+
+        if has_played:
+            embed.add_field(name=f'*First Played ({title_history[1]})*', value=f'` {title_history[2]} ({title_history[0]}) `', inline=False)
+            embed.add_field(name=f'*Last Played ({title_history[4]})*', value=f'` {title_history[5]} ({title_history[3]}) `', inline=False)
+
+        embed.set_footer(text=presence_text if device is None else f'{presence_text} ({device})')
+
+        embeds = [embed]
+
+        if len(found) > 1:
+            versions_embed = discord.Embed(description=':warning: Found multiple versions for this gamertag!', color=0x36393f)
+
+            for combination in found:
+                versions_embed.add_field(name=f'*{combination.split("|")[1]}*', value=f'**XUID:** ` {combination.split("|")[0]} `', inline=False)
+
+            embeds.append(versions_embed)
+
+        if linked_accounts:
+            account_links = []
+
+            #if following_count > 0:
+            #    account_links.append(f'Friend List|{pastebin_url}')
+
+            for index, _ in enumerate(linked_accounts):
+                account_links.append(f'{linked_accounts[index]["networkName"]} ({linked_accounts[index]["displayName"]})|{linked_accounts[index]["deeplink"]}')
+
+            await interaction.edit_original_response(embeds=embeds, view=link.View(account_links))
+
+        else:
+            #if following_count > 0:
+            #    await interaction.edit_original_response(embeds=embeds, view=link.View([f'Friend List|{pastebin_url}']))
+            #else:
+                
+            await interaction.edit_original_response(embeds=embeds)
+
+    
+    @app_commands.command(name='xuid', description='Grabs a gamertags XUID')
+    @app_commands.guild_only
+    async def _xuid(self, interaction: discord.Interaction, gamertag: str):
+        if helper.settings['Application']['Test mode'] and interaction.user.id != 1057753454388453416:
+            return await interaction.response.send_message(':warning: I am currently in **Test Mode**. Please try this command again later!', ephemeral=True)
+
+        await interaction.response.defer()
+
+        found = await helper.grab_xuids(gamertag)
+
+        if not found:
+            embed = discord.Embed(color=0xff0000)
+            embed.set_author(name=f'Gamertag is invalid!', icon_url='https://th.bing.com/th/id/R.c1ab0eaefe96d3c24dbcd1f706f9b772?rik=8flRJ%2bS8UxeReQ&pid=ImgRaw&r=0')
+
+            return await interaction.edit_original_response(embed=embed)
+
+        xuid = found[0].split("|")[0]
+
+        information = await helper.gather_information(xuid, options=['gamertag', 'uniqueModernGamertag', 'displayPicRaw', 'primaryColor'])
+
+        gamertag = information[0]
+        unique_modern_gamertag = information[1]
+        display_pic_raw = information[2]
+        primary_color = information[3]
+
+        if primary_color is None:
+            color = 0x107c10
+        else:
+            color = int(primary_color, 16)
+
+        embed = discord.Embed(title=f'*{f"{unique_modern_gamertag} ({gamertag})" if gamertag != unique_modern_gamertag else gamertag}{helper.single_quote if gamertag[-1] == "s" else f"{helper.single_quote}s"} XUID*', color=color)
+
+        embed.set_thumbnail(url=display_pic_raw)
+
+        embed.add_field(name=f'*Hexadecimal*', value=f'` {hex(int(xuid))} `', inline=False)
+        embed.add_field(name=f'*Decimal*', value=f'` {xuid} `', inline=False)
+
+        await interaction.edit_original_response(embed=embed)
+
+            
+    @app_commands.command(name='gamerpic', description='Grabs a gamertag or XUIDs gamerpic')
+    @app_commands.describe(arg='Gamertag or XUID')
+    @app_commands.guild_only
+    async def _gamerpic(self, interaction: discord.Interaction, arg: str):
+        if helper.settings['Application']['Test mode'] and interaction.user.id != 1057753454388453416:
+            return await interaction.response.send_message(':warning: I am currently in **Test Mode**. Please try this command again later!', ephemeral=True)
+
+        await interaction.response.defer()
+
+        if arg.isdigit() and len(arg) > 15:
+            pass
+
+        else:
+            found = await helper.grab_xuids(arg)
+
+            if not found:
+                embed = discord.Embed(color=0xff0000)
+                embed.set_author(name=f'Gamertag is invalid!', icon_url='https://th.bing.com/th/id/R.c1ab0eaefe96d3c24dbcd1f706f9b772?rik=8flRJ%2bS8UxeReQ&pid=ImgRaw&r=0')
+
+                return await interaction.edit_original_response(embed=embed)
+            
+            arg = found[0].split('|')[0]
+
+        try:
+            information = await helper.gather_information(arg, options=['gamertag', 'uniqueModernGamertag', 'displayPicRaw', 'primaryColor'])
+
+        except exceptions.InvalidXUIDError:
+            embed = discord.Embed(color=0xff0000)
+            embed.set_author(name=f'XUID is invalid!', icon_url='https://th.bing.com/th/id/R.c1ab0eaefe96d3c24dbcd1f706f9b772?rik=8flRJ%2bS8UxeReQ&pid=ImgRaw&r=0')
+
+            return await interaction.edit_original_response(embed=embed)
+
+        gamertag = information[0]
+        unique_modern_gamertag = information[1]
+        display_pic_raw = information[2]
+        primary_color = information[3]
+
+        if primary_color is None:
+            color = 0x107c10
+        else:
+            color = int(primary_color, 16)
+
+        embed = discord.Embed(title=f'*{f"{unique_modern_gamertag} ({gamertag})" if gamertag != unique_modern_gamertag else gamertag}{helper.single_quote if gamertag[-1] == "s" else f"{helper.single_quote}s"} Gamerpic*', url=display_pic_raw, color=color)
+
+        embed.set_image(url=display_pic_raw)
+
+        await interaction.edit_original_response(embed=embed)
+
+async def setup(bot):
+    commands = Commands(bot)
+
+    asyncio.create_task(helper.xbl2_token_updater())
+
+    for user_token in [user_token.strip() for user_token in open('user_tokens.txt').readlines()]:
+        asyncio.create_task(helper.xbl3_token_updater(user_token))
+
+    await bot.add_cog(commands)
+class InvalidXUIDError(Exception):
+    pass
+
+class NoTitleHistoryError(Exception):
+    pass
+
+class NoAccountsInStockError(Exception):
+    pass
+import json
+import asyncio
+import objects
+import aiohttp
+import requests
+import datetime
+import itertools
+import exceptions
+
+from random import random
+from urllib.parse import urlencode, unquote
+
+
+index, single_quote = -1, "'"
+xbl2_token, xbl3_tokens = None, []
+aiohttp_session, requests_session = None, requests.Session()
+
+
+with open('settings.json') as _file:
+    settings = json.load(_file)
+
+
+def xbl3_token() -> any:
+    global index
+
+    index += 1
+
+    if index >= len(xbl3_tokens):
+        index = 0
+
+    return xbl3_tokens[index]
+
+
+def format_device(device: str) -> str:
+    if device == 'Scarlett':
+        formatted_device = 'Xbox Series S|X'
+
+    elif device == 'XboxOne':
+        formatted_device = 'Xbox One'
+
+    elif device == 'Xbox360':
+        formatted_device = 'Xbox 360'
+
+    elif device == 'WindowsOneCore' or 'PC':
+        formatted_device = 'PC'
+
+    return formatted_device
+
+
+async def xbl3_token_updater(user_token: str) -> None:
+    while True:
+        token = await grab_token(user_token, created=True)
+
+        if token is None:
+            break
+
+        xbl3_tokens.append(token)
+
+        await asyncio.sleep(57300)
+
+        xbl3_tokens.remove(token)
+
+
+
+async def set_session():
+    global aiohttp_session
+
+    if aiohttp_session is not None:
+        await aiohttp_session.close()
+    
+    aiohttp_session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False))
+
+
+async def grab_xuids(gamertag: str) -> list:
+    combinations, found = generate_combinations(gamertag), []
+
+    await asyncio.gather(*[find_xuids(combination, found) for combination in combinations])
+
+    xuids = []
+
+    for xuid in found:
+        if xuid not in xuids:
+            xuids.append(xuid)
+
+    return xuids
+
+
+async def grab_user_token(email: str, password: str) -> str:
+    encoding = unquote(urlencode({
+		'client_id': '0000000048093EE3',
+		'redirect_uri': 'https://login.live.com/oauth20_desktop.srf',
+		'response_type': 'token',
+		'display': 'touch',
+		'scope': 'service::user.auth.xboxlive.com::MBI_SSL',
+		'locale': 'en'
+	}))
+    
+    response = requests_session.get('https://login.live.com/oauth20_authorize.srf?' + encoding)
+    
+    sft_tag, url_post = response.text.split('sFTTag:\'')[1].split('value="')[1].split('"/>')[0], response.text.split('urlPost:\'')[1].split('\'')[0]
+    
+    payload = {'login': email, 'passwd': password, 'PPFT': sft_tag}
+    
+    response = requests_session.post(url_post, data=payload)
+    
+    payload = {
+		'RelyingParty': 'http://auth.xboxlive.com',
+		'TokenType': 'JWT',
+		'Properties': {
+		    'AuthMethod': 'RPS',
+		    'SiteName': 'user.auth.xboxlive.com',
+		    'RpsTicket': response.url.split('access_token=')[1].split('&token_type=')[0]
+		}
+	}
+	
+    response = requests_session.post('https://user.auth.xboxlive.com/user/authenticate', json=payload)
+    
+    data = response.json()
+    
+    return data['Token']
+
+
+async def grab_token(user_token: str, created: bool = False) -> None:
+    payload = {
+        'RelyingParty': 'http://xboxlive.com' if created else 'http://accounts.xboxlive.com',
+        'TokenType': 'JWT',
+        'Properties': {
+            'UserTokens': [user_token],
+            'SandboxId': 'RETAIL'
+        }
+    }
+
+    async with aiohttp_session.post('https://20.69.107.178:443/xsts/authorize', json=payload) as response:
+        if response.status == 200:
+            data = await response.json()
+
+            token, uhs, xuid = data['Token'], data['DisplayClaims']['xui'][0]['uhs'], data['DisplayClaims']['xui'][0]['xid']
+
+            return objects.Token(token, uhs, user_token, xuid)
+
+        else:
+            return None
+
+
+def remove_token(token) -> None:
+    user_tokens = [user_token.strip() for user_token in open('user_tokens.txt').readlines()]
+
+    with open('user_tokens.txt', 'w') as _file:
+        _file.write('\n'.join(user_token for user_token in user_tokens if user_token != token.user_token))
+
+    xbl3_tokens.remove(token)
+
+
+def generate_combinations(gamertag: str) -> list:
+    fixed_gamertag = gamertag.replace(' ', '')
+
+    binary = itertools.product(['', ' '], repeat=len(fixed_gamertag) - 1)
+    zipped_binary = (itertools.zip_longest(fixed_gamertag, combination, fillvalue='') for combination in binary)
+
+    combinations = []
+
+    for combination in zipped_binary:
+        chain = ''.join(itertools.chain.from_iterable(combination))
+
+        if len(chain) <= 15:
+            combinations.append(''.join(character if random()>.5 else character.upper() for character in chain))
+
+    return combinations
+
+
+async def get_title_history(xuid: str):
+    token = xbl3_token()
+
+    headers = {'Authorization': f'XBL3.0 x={token.uhs};{token.token}', 'X-XBL-Contract-Version': '2', 'Accept-Language': 'en-CA, en-GB'}
+
+    async with aiohttp_session.get(f'https://20.80.190.164:443/users/xuid({xuid})/titles/titleHistory/decoration/TitleHistory', headers=headers) as response:
+        if response.status == 200:
+            data = await response.json()
+
+            try:
+                try:
+                    first_time_played = datetime.strptime(data['titles'][-1]['titleHistory']['lastTimePlayed'], '%Y-%m-%dT%H:%M:%SZ')
+                except:
+                    first_time_played = datetime.strptime(data['titles'][-1]['titleHistory']['lastTimePlayed'].split('.')[0], '%Y-%m-%dT%H:%M:%S')
+
+                first_title_name, first_device = format_device(data['titles'][-1]['devices'][0]), data['titles'][-1]['name']
+
+                try:
+                    last_time_played = datetime.strptime(data['titles'][0]['titleHistory']['lastTimePlayed'], '%Y-%m-%dT%H:%M:%SZ')
+                except:
+                    last_time_played = datetime.strptime(data['titles'][0]['titleHistory']['lastTimePlayed'].split('.')[0], '%Y-%m-%dT%H:%M:%S')
+
+                last_title_name, second_device = format_device(data['titles'][0]['devices'][0]), data['titles'][0]['name']
+
+                has_played = True
+
+            except:
+                has_played = False
+
+        elif response.status == 401:
+            remove_token(token)
+
+            return await get_title_history(xuid)
+
+    if has_played:
+        return first_title_name, first_time_played, first_device, last_title_name, last_time_played, second_device
+
+    else:
+        raise exceptions.NoTitleHistoryError(f'XUID: {xuid} has no title history!')
+ 
+
+async def gather_information(xuid: str, options: list):
+    token = xbl3_token()
+
+    headers = {'Authorization': f'XBL3.0 x={token.uhs};{token.token}', 'X-XBL-Contract-Version': '5', 'Accept-Language': 'en-CA, en-GB'}
+
+    async with aiohttp_session.get(f'https://20.187.45.173:443/users/me/people/xuids({xuid})/decoration/detail,preferredColor,presenceDetail', headers=headers) as response:
+        if response.status == 200:
+            data = await response.json()
+
+            information = []
+
+            if 'gamertag' in options:
+                information.append(data['people'][0]['gamertag'])
+
+            if 'uniqueModernGamertag' in options:
+                information.append(data['people'][0]['uniqueModernGamertag'])
+
+            if 'gamerScore' in options:
+                information.append(data['people'][0]['gamerScore'])
+
+            if 'tenure' in options:
+                information.append(data['people'][0]['detail']['tenure'])
+
+            if 'displayPicRaw' in options:
+                information.append(data['people'][0]['displayPicRaw'].replace('&mode=Padding', ''))
+
+            if 'bio' in options:
+                information.append(data['people'][0]['detail']['bio'])
+
+            if 'location' in options:
+                information.append(data['people'][0]['detail']['location'])
+
+            if 'realName' in options:
+                information.append(data['people'][0]['realName'])
+
+            if 'followerCount' in options:
+                information.append(data['people'][0]['detail']['followerCount'])
+
+            if 'followingCount' in options:
+                information.append(data['people'][0]['detail']['followingCount'])
+
+            if 'linkedAccounts' in options:
+                information.append(data['people'][0]['linkedAccounts'])
+
+            if 'primaryColor' in options:
+                information.append(data['people'][0]['preferredColor']['primaryColor'])
+
+            if 'presenceText' in options:
+                information.append(data['people'][0]['presenceText'])
+
+            if 'Device' in options:
+                try:
+                    information.append(format_device(data['people'][0]['presenceDetails'][0]['Device']))
+                except:
+                    information.append(None)
+
+            return information
+
+        elif response.status == 400:
+            raise exceptions.InvalidXUIDError(f'XUID: {xuid} is invalid!')
+
+        elif response.status == 401:
+            remove_token(token)
+
+            await gather_information(xuid, options)
+
+
+async def stats_updater():
+    while True:
+        balance = 5
+
+        print(f'[Stats Updater] XBL3.0 tokens: {len(xbl3_tokens) * 1:,}', end='\r', flush=True)
+
+        await asyncio.sleep(settings['Application']['Stats updater delay'])
+
+
+async def find_xuids(gamertag: str, found: list) -> None:
+    async with aiohttp_session.get(f'https://20.69.172.119:443/users/gt({gamertag})/profile/settings?settings=Gamertag', headers={'Authorization': xbl2_token, 'X-XBL-Contract-Version': '2'}) as response:
+        if response.status == 200:
+            data = await response.json()
+
+            gamertag_found_with_services, xuid_found_with_services = data['profileUsers'][0]['settings'][0]['value'], int(data['profileUsers'][0]['id'])
+
+            if gamertag.replace(' ', '').lower() == gamertag_found_with_services.replace(' ', '').lower():
+                found.append(f'{xuid_found_with_services}|{gamertag_found_with_services}')
+
+        else:
+            xuid_found_with_services = None
+
+    token = xbl3_token()
+
+    headers = {'Authorization': f'XBL3.0 x={token.uhs};{token.token}', 'X-XBL-Contract-Version': '5', 'Accept-Language': 'en-CA, en-GB'}
+        
+    async with aiohttp_session.get(f'https://20.187.45.173:443/users/me/people/search/decoration/detail?q={gamertag.replace(" ", "%2520")}&maxItems=10', headers=headers) as response:
+        if response.status == 200:
+            data = await response.json()
+
+            for index, _ in enumerate(data['people']):
+                gamertag_found_with_peoplehub, xuid_found_with_peoplehub = data['people'][index]['gamertag'], int(data['people'][index]['xuid'])
+
+                if gamertag.replace(' ', '').lower() == gamertag_found_with_peoplehub.replace(' ', '').lower() and xuid_found_with_peoplehub != xuid_found_with_services:
+                    found.append(f'{xuid_found_with_peoplehub}|{gamertag_found_with_peoplehub}')
+
+        elif response.status == 401:
+            remove_token(token)
+            
+            await find_xuids(gamertag, found)
+
+
+async def convert_user_token(user_token: str) -> None:
+    token = await grab_token(user_token)
+
+    payload = {
+        'dateOfBirth': '2000-01-01T00:00:00.0000000',
+        'email': '',
+        'firstName': '',
+        'gamerTag': '',
+        'gamerTagChangeReason': None,
+        'homeAddressInfo': {
+            'city': None,
+            'country': 'US',
+            'postalCode': None,
+            'state': None,
+            'street1': None,
+            'street2': None
+        },
+        'homeConsole': None,
+        'imageUrl': '',
+        'isAdult': True,
+        'lastName': '',
+        'legalCountry': 'US',
+        'locale': 'en-US',
+        'midasConsole': None,
+        'msftOptin': True,
+        'ownerHash': None,
+        'ownerXuid': None,
+        'partnerOptin': True,
+        'requirePasskeyForPurchase': False,
+        'requirePasskeyForSignIn': False,
+        'subscriptionEntitlementInfo': None,
+        'touAcceptanceDate': '2000-01-01T00:00:00.0000000',
+        'userHash': token.uhs,
+        'userKey': None,
+        'userXuid': '216258806147975844'
+    }
+
+    async with aiohttp_session.post('https://accountstroubleshooter.xboxlive.com/users/current/profile', headers={'Authorization': f'XBL3.0 x={token.uhs};{token.token}', 'X-XBL-Contract-Version': '4'}, json=payload) as response:
+        return response.status
+
+
+async def xbl2_token_updater():
+    global xbl2_token
+    
+    while True:
+        with requests.Session() as session:
+            try:
+                encoded_url = urlencode({
+		            'client_id': '0000000048093EE3',
+		            'redirect_uri': 'https://login.live.com/oauth20_desktop.srf',
+		            'response_type': 'token',
+		            'display': 'touch',
+		            'scope': 'service::live.xbox.com::MBI_SSL',
+		            'locale': 'en'
+		        })
+
+                response = session.get('https://login.live.com:443/oauth20_authorize.srf?' + encoded_url)
+
+                sft_tag, url_post = response.text.split('sFTTag:\'')[1].split('value="')[1].split('"/>')[0], response.text.split('urlPost:\'')[1].split('\'')[0]
+
+                payload = {'login': settings['Xbox account (Format: Email|Password)'].split('|')[0], 'passwd': settings['Xbox account (Format: Email|Password)'].split('|')[1], 'PPFT': sft_tag}
+
+                response = session.post(url_post, data=payload)
+
+                access_token = response.url.split('access_token=')[1].split('&token_type=')[0]
+
+                headers = {'Authorization': f'WLID1.0 t={access_token}', 'Content-Type': 'application/soap+xml; charset=utf-8'}
+
+                payload = '''
+		        <s:Envelope
+	                xmlns:s='http://www.w3.org/2003/05/soap-envelope'
+	                xmlns:a='http://www.w3.org/2005/08/addressing'>
+	                <s:Header>
+		    			<a:Action s:mustUnderstand='1'>http://docs.oasis-open.org/ws-sx/ws-trust/200512/RST/Issue</a:Action>
+		    			<a:MessageID>urn:uuid:2bd42a2f-8999-45a7-83f2-f0aab2d2a117</a:MessageID>
+		    			<a:ReplyTo>
+		    				<a:Address>http://www.w3.org/2005/08/addressing/anonymous</a:Address>
+		    			</a:ReplyTo>
+		    			<a:To s:mustUnderstand='1'>http://activeauth.xboxlive.com//XSts/xsts.svc/IWSTrust13</a:To>
+		    		</s:Header>
+		    		<s:Body>
+		    			<trust:RequestSecurityToken
+		    				xmlns:trust='http://docs.oasis-open.org/ws-sx/ws-trust/200512'>
+		    				<wsp:AppliesTo
+		    					xmlns:wsp='http://schemas.xmlsoap.org/ws/2004/09/policy'>
+		    					<EndpointReference
+		    						xmlns='http://www.w3.org/2005/08/addressing'>
+		    						<Address>http://xboxlive.com</Address>
+		    					</EndpointReference>
+		    				</wsp:AppliesTo>
+		    				<trust:KeyType>http://docs.oasis-open.org/ws-sx/ws-trust/200512/Bearer</trust:KeyType>
+		    				<trust:RequestType>http://docs.oasis-open.org/ws-sx/ws-trust/200512/Issue</trust:RequestType>
+		    				<trust:TokenType>http://docs.oasis-open.org/wss/oasis-wss-saml-token-profile-1.1#SAMLV2.0</trust:TokenType>
+		    			</trust:RequestSecurityToken>
+		    		</s:Body>
+		    	</s:Envelope>
+		        '''
+
+                response = session.post('https://activeauth.xboxlive.com:443/XSts/xsts.svc/IWSTrust13', headers=headers, data=payload)
+
+                security_token = str(response.content).split('</e:EncryptionMethod><KeyInfo><o:SecurityTokenReference')[1].split('</trust:RequestedSecurityToken><trust:R')[0]
+
+                xbl2_token = f'XBL2.0 x=<EncryptedAssertion xmlns="urn:oasis:names:tc:SAML:2.0:assertion"><xenc:EncryptedData Type="http://www.w3.org/2001/04/xmlenc#Element" xmlns:xenc="http://www.w3.org/2001/04/xmlenc#"><xenc:EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#aes256-cbc"/><KeyInfo xmlns="http://www.w3.org/2000/09/xmldsig#"><e:EncryptedKey xmlns:e="http://www.w3.org/2001/04/xmlenc#"><e:EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p"><DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/></e:EncryptionMethod><KeyInfo><o:SecurityTokenReference{security_token}'
+
+                await asyncio.sleep(14100)
+
+            except:
+                pass
+import helper
+import asyncio
+
+
+class Account:
+    def __init__(self, email: str, password: str) -> None:
+        self.email, self.password = email, password
+
+
+class Token:
+    def __init__(self, token: str, uhs: str, user_token: str, xuid: str) -> None:
+        self.token, self.uhs, self.user_token, self.xuid = token, uhs, user_token, xuid
+
+
+class Stats:
+    def __init__(self, gamertag: str, user_id: int) -> None:
+        self.combinations = helper.generate_combinations(gamertag)
+
+        self.running, self.reserved = True, False
+
+        self.attempts, self.rl, self.rs = 0, 0, 0
+
+        self.user_id = user_id
+
+        self.index = -1
+
+
+    def current_combination(self) -> any:
+        self.index += 1
+        if self.index >= len(self.combinations):
+            self.index = 0
+
+        return self.combinations[self.index]
+        
+
+    async def calculate_rs(self) -> None:
+        while self.running:
+            before = self.attempts
+            await asyncio.sleep(1)
+            self.rs = self.attempts - before
+[
+    {
+        "User ID": "1057753454388453416",
+        "Purchase date": "2023-02-22 02:16:50.572382",
+        "Expiry date": "2029-02-22 02:16:50.572382",
+        "Is reseller": false
+    },
+    {
+        "User ID": "1234",
+        "Purchase date": "2023-02-22 08:59:22.556529",
+        "Expiry date": "2023-02-22 08:59:22.556529",
+        "Is reseller": true
+    },
+    {
+        "User ID": "4321",
+        "Purchase date": "2023-02-22 09:00:10.818497",
+        "Expiry date": "2023-02-22 09:00:10.818497",
+        "Is reseller": false
+    }
+]import json
+import helper
+import objects
+import discord
+import asyncio
+import simplejson
+import aiohttp
+
+from datetime import datetime
+from discord.ext import commands
+from discord import app_commands
+from dateutil.relativedelta import relativedelta
+
+class Reserve(commands.Cog):
+    def __init__(self, bot) -> None:
+        self.sessions = []
+        self.bot = bot
+        self.sent = 0
+
+
+    @staticmethod
+    def check_if_plan_expired(user_id: int):
+        with open('purchases.json', 'r') as _file:
+            purchases = json.load(_file)
+
+        for index, _ in enumerate(purchases):
+            if str(user_id) == purchases[index]['User ID']:
+                expiry_date, today = datetime.strptime(purchases[index]['Expiry date'], '%Y-%m-%d %H:%M:%S.%f'), datetime.today()
+
+                if expiry_date.date() <= today.date():
+                    return True
+
+
+    async def update_embed(self, interaction: discord.Interaction, information: str, reservation_id: str, stats: objects.Stats) -> None:
+        gamertag = information[0]
+        display_pic_raw = information[1]
+        primary_color = information[2]
+        if primary_color is None:
+            color = 0x107c10
+        else:
+            color = int(primary_color, 16)
+        while stats.running:
+            if stats.reserved:
+                await interaction.edit_original_response(content=f'**{gamertag}** has been reserved :white_check_mark:')
+                stats.running = False
+                break
+            embed = discord.Embed(title=f'Target: {gamertag}', url=f'https://xboxgamertag.com/search/{gamertag.replace(" ", "-")}', color=color)
+            embed.set_thumbnail(url=display_pic_raw)
+            embed.add_field(name='*Attempts*', value=f'` {stats.attempts}/{helper.settings["Reserve"]["Max attempts"]} `')
+            embed.add_field(name='*Rate limits*', value=f'` {stats.rl} `')
+            embed.add_field(name='*Requests per second*', value=f'` {stats.rs} `')
+            embed.set_footer(text=f'Reservation ID: {reservation_id}')
+            await interaction.edit_original_response(embed=embed)
+            await asyncio.sleep(0.5)
+
+    async def update_embed_followers(self, interaction: discord.Interaction, amounttoadd: str, information: str):
+        gamertag = information[0]
+        display_pic_raw = information[1]
+        primary_color = information[3]
+        follower_count = information[2]
+        if primary_color is None:
+            color = 0x107c10
+        else:
+            color = int(primary_color, 16)
+        embed = discord.Embed(title=f'Target: {gamertag}', url=f'https://xboxgamertag.com/search/{gamertag.replace(" ", "-")}', color=color)
+        embed.set_thumbnail(url=display_pic_raw)
+        embed.add_field(name='*Follower count*', value=f'` {follower_count} `')
+        embed.add_field(name='*Amount to add*', value=f'` {amounttoadd} `')
+        embed.set_footer(text='Developed By Putin')
+        await interaction.edit_original_response(embed=embed)
+        await asyncio.sleep(0.5)
+
+
+    async def follow(self, xuid: str, amounttoadd: str):
+        print()
+        for _ in range(int(amounttoadd)):
+            token = helper.xbl3_token()
+            url = f'https://social.xboxlive.com/users/xuid({token.xuid})/people/xuids?method=add'
+            headers = {
+                'Authorization': f'XBL3.0 x={token.uhs};{token.token}',
+                'Accept-Charset': 'UTF-8',
+                'x-xbl-contract-version': '2',
+                'Accept': 'application/json',
+                'Content-Type': "application/json",
+                'Host': 'social.xboxlive.com',
+                'Expect': '100-continue',
+                'Connection': 'Keep-Alive',
+            }
+            payload = {
+                'xuids': [xuid.split("|")[0]]
+            }
+            async with helper.aiohttp_session.post(url, headers=headers, json=payload) as res:
+                if res.status == 200 or res.status == 204:
+                    print("Successfully Followed User")
+                else:
+                    pass
+
+    @app_commands.command(name='follow')
+    async def _follow(self, interaction: discord.Interaction, gamertag: str, amounttoadd: str):
+         if helper.settings['Application']['Test mode'] and interaction.user.id != 532576383331860544:
+             return await interaction.response.send_message(':warning: I am currently in **Test Mode**. Please try this command again later!', ephemeral=True)
+
+         with open('purchases.json', 'r') as _file:
+             purchases = json.load(_file)
+
+         user_id = interaction.user.id
+
+         if str(user_id) not in [purchases[index]['User ID'] for index, _ in enumerate(purchases)]:
+             return await interaction.response.send_message(':warning: This feature is paid only. PM <@1057753454388453416> to purchase!')
+
+         expired = self.check_if_plan_expired(user_id)
+
+         if expired:
+             return await interaction.response.send_message(f':warning: <@{user_id}> your plan has expired! If you\'d like to renew it, PM <@1057753454388453416>.', ephemeral=True)
+
+         await interaction.response.defer(ephemeral=True)
+
+         found = await helper.grab_xuids(gamertag)
+
+         if not found:
+             embed = discord.Embed(color=0xff0000)
+             embed.set_author(name=f'Target is invalid!', icon_url='https://th.bing.com/th/id/R.c1ab0eaefe96d3c24dbcd1f706f9b772?rik=8flRJ%2bS8UxeReQ&pid=ImgRaw&r=0')
+
+             return await interaction.edit_original_response(embed=embed)
+
+         xuid = found[0].split('|')[0]
+
+         information = await helper.gather_information(xuid, options=['gamertag', 'displayPicRaw', 'primaryColor', 'followerCount'])
+
+         asyncio.create_task(self.update_embed_followers(interaction, amounttoadd, information))
+         asyncio.create_task(self.follow(found[0], amounttoadd))
+
+    async def reserve(self, reservation_id: str, stats: objects.Stats) -> None:
+        token = helper.xbl3_token()
+
+        headers = {'Authorization': f'XBL3.0 x={token.uhs};{token.token}', 'X-XBL-Contract-Version': '1'}
+        payload = {'classicGamertag': stats.current_combination(), 'reservationId': f'{reservation_id}', 'targetGamertagFields': 'classicGamertag'}
+
+        async with helper.aiohttp_session.post('https://20.112.101.38:443/gamertags/reserve', headers=headers, json=payload) as response:
+            if response.status == 409:
+                stats.attempts += 1
+
+            elif response.status == 200:
+                stats.reserved = True
+
+            elif response.status == 429:
+                stats.rl += 1
+
+
+    @app_commands.command(name='reserve', description='Attempts to reserve a gamertag to an XUID')
+    @app_commands.describe(target='Target', reservation_id='XUID to reserve to')
+    async def _reserve(self, interaction: discord.Interaction, target: str, reservation_id: str):
+        if helper.settings['Application']['Test mode'] and interaction.user.id != 532576383331860544:
+            return await interaction.response.send_message(':warning: I am currently in **Test Mode**. Please try this command again later!', ephemeral=True)
+
+        with open('purchases.json', 'r') as _file:
+            purchases = json.load(_file)
+
+        user_id = interaction.user.id
+
+        if str(user_id) not in [purchases[index]['User ID'] for index, _ in enumerate(purchases)]:
+            return await interaction.response.send_message(':warning: This feature is paid only. PM <@1057753454388453416> to purchase!')
+
+        expired = self.check_if_plan_expired(user_id)
+
+        if expired:
+            return await interaction.response.send_message(f':warning: <@{user_id}> your plan has expired! If you\'d like to renew it, PM <@1057753454388453416>.', ephemeral=True)
+
+        max_sessions, max_attempts = helper.settings['Reserve']['Max sessions'], helper.settings['Reserve']['Max attempts']
+
+        stats = objects.Stats(target, user_id)
+
+        if len(self.sessions) + 1 <= max_sessions:
+            self.sessions.append(stats)
+
+        else:
+            return await interaction.response.send_message(f':warning: All sessions occupied! ({len(self.sessions)}/{max_sessions})', ephemeral=True)
+
+        await interaction.response.defer(ephemeral=True)
+
+        found = await helper.grab_xuids(target)
+
+        if not found:
+            stats.running = False
+            
+            self.sessions.remove(stats)
+
+            embed = discord.Embed(color=0xff0000)
+            embed.set_author(name=f'Target is invalid!', icon_url='https://th.bing.com/th/id/R.c1ab0eaefe96d3c24dbcd1f706f9b772?rik=8flRJ%2bS8UxeReQ&pid=ImgRaw&r=0')
+
+            return await interaction.edit_original_response(embed=embed)
+
+        xuid = found[0].split('|')[0]
+
+        information = await helper.gather_information(xuid, options=['gamertag', 'displayPicRaw', 'primaryColor'])
+
+        asyncio.create_task(self.update_embed(interaction, information, reservation_id, stats)), asyncio.create_task(stats.calculate_rs())
+
+        while stats.running:
+            if stats.attempts >= max_attempts or stats.rl >= max_attempts:
+                stats.running = False
+
+            asyncio.create_task(self.reserve(reservation_id, stats))
+
+            await asyncio.sleep(helper.settings['Reserve']['Delay'])
+
+        self.sessions.remove(stats)
+
+
+    @commands.command()
+    @commands.is_owner()
+    async def sessions(self, ctx):
+        sessions = []
+
+        for index, session in enumerate(self.sessions):
+            sessions.append(f'**{index + 1}.** <@{session.user_id}> ` (Target: {session.combinations[0]}) `')
+
+        embed = discord.Embed(title='Sessions', description='\n'.join(sessions), color=0x107c10)
+        
+        embed.set_footer(text=f'{len(sessions)}/{helper.settings["Reserve"]["Max sessions"]} Occupied')
+
+        await ctx.send(embed=embed)
+
+    @app_commands.command(name='auth', description='Authenticates user from discord ID')
+    async def _auth(self, interaction: discord.Interaction, user_id: str, days: int, is_reseller: bool = False):
+        if interaction.user.id != 1057753454388453416:
+            return await interaction.response.send_message('You are not owner')
+        with open('purchases.json', 'r') as _file:
+            purchases = json.load(_file)
+
+        if any(purchases[index]['User ID'] == user_id for index, _ in enumerate(purchases)):
+            #return await ctx.reply(f':warning: **{user_id}** already has a plan!')
+            return await interaction.response.send_message('user is already registered', ephemeral=True)
+
+        purchase_date = datetime.now()
+        expiry_date = purchase_date + relativedelta(days=days)
+
+        purchases.append({
+            "User ID": user_id,
+            "Purchase date": str(purchase_date),
+            "Expiry date": str(expiry_date),
+            "Is reseller": is_reseller
+        })
+
+        with open('purchases.json', 'w+') as _file:
+            _file.write(simplejson.dumps(purchases, indent=4))
+
+        return await interaction.response.send_message(f'**{user_id}** is now authenticated', ephemeral=True)
+
+async def setup(bot):
+    reserve = Reserve(bot)
+
+    await bot.add_cog(reserve)
+{
+    "Application": {
+        "Stats updater delay": 120,
+        "Test mode": false
+    },
+
+    "Bot": {
+	"Token": "MTA2NDkyMzUxNzcyMTc4MDIzNA.GJBIpx.UYnJwSZ6V9DV2yCZCKqcFHtPBGkrwWBTuqwvjE",
+        "Prefix": "x."
+    },
+
+    "Reserve": {
+        "Max sessions": 2,
+        "Max attempts": 100,
+        "Delay": 0.5
+    },
+
+    "Xbox account (Format: Email|Password)": "fgsjsr7kydtyk6@outlook.com|Pass2020"
+}
+eyJhbGciOiJSU0EtT0FFUCIsImVuYyI6IkExMjhDQkMtSFMyNTYiLCJ6aXAiOiJERUYiLCJ4NXQiOiJxcEQtU2ZoOUg3NFFHOXlMN1hSZXJ5RmZvbk0iLCJjdHkiOiJKV1QifQ.NFYtC2TyHhZNIsDuTDdEFRyVW2R9tssBJUIIJUU0YjNUmGMV4baOWlVuMrFTSBkja_pM8v79CLkY33QSpOLLWjU4yHXrdgcd9-8yw6MGzTm9EJmDkfPDeMLlIG3lF97-JzA-av033z66Mfl14R_dCyznFD7VYzOV2NG75RaICxYPem4duQtj7zOffcYeNzXTTOLtQWZA3ET0Wr7svR0dj0VjEECVbc9N0JLli7bmrzuuGRPGsTMG_eAtk7B6MLOEGoe73Z5JJsy44tOxfbm8NWrnIwAqLKorMJ-3ua-g385s7gWZ0JRrwo3o72Ac4rxCbu0HHxRGfr6ufu4NY_-lMQ.SE4_3s0CpynpubhE5M_HzQ.F0CPmYVVt1R1lbXokNYLU9gxyOEJTyzxJQNTlCD5Y9RmDvM14OitwYOxHcTG_BmOajgJQ-DxcT1jW9RN0negWgPnjdIQLwQzKVOPXaOd192X3_EvM99vzV8IiTLMi-0ELdPBbgZ8pr8Qk7Q7iRUtkJJgquQMfGmz6tbNJs-CcmabaAAnsqitf1-RVEWKhLeF4GEcXmshGSY-9Ae-KeoSsWTvUUYkdl_HNGUGLvYS2NM4gZ05PjjaOHUb0FbIrc4VbybgtVMdkEav_VSfOPCQ8fFDOv4AUDc9wE_E6Ag0PA4pOr8kb7DlZgqtvftq7Q8GRHbEaNRuBtfCkwNNBThz_pxZg6BPEVz9-klZbkbX7ZuKO-N7g02b3vKP7gAq38UHQk-N822vZxEH9HTaM22Z_E4OUu-NfWYjGZ0ZVdMxnkoxZ5TwKEYoo4dryGbduZTlRDrz3_wCIq73J4XoXixr01XVZXC49d8U9WzRoD-VfmIe4wcMQ9UrORhqEo9HcTQWflM7q1Do90iMrQiCIKWIL4pc_SwWd3nz4JlSgyMXJoRXd-YtLQWzJMoJ2U3AfFTl0xRboPUFl229Hruu7BydlyloVp7vVEjFv1scWzrBeGuhHBoTwpNgKV-4rS08l6QVr-1EYe26OjJMbR3JPqdNPbJOGPNxz2B5BX9RbURQFZj6DyeivORe70NF395wx7G6h1OcyCVCkLMpkpBX319s9aElyZ_QvjXmhZB5sXu1aCVQCDzO-f6Sw5TgPdrK0TxRkvypzCe6vLXSznky32Q9D-lfo7_hj_c581j6WW6pCEl5G3pd0Gq-gHe37iYwLzwm-g_ySHu4II7P3D4cuRyk6xgHOamkjtjLA3z1UroZhnTM3zFTiZgQAjo-nz9TAmSO8EUbGLIyBQ08zN0Vn_blKuD4tjcUJdEnvrgFbFhl76w.dVZLoCq9mMjsgNGDIuydeg
+eyJhbGciOiJSU0EtT0FFUCIsImVuYyI6IkExMjhDQkMtSFMyNTYiLCJ6aXAiOiJERUYiLCJ4NXQiOiJxcEQtU2ZoOUg3NFFHOXlMN1hSZXJ5RmZvbk0iLCJjdHkiOiJKV1QifQ.t_ywa2zr6R2mRDgf-ePExmLx8PqstiQsO2DzgQ8A4XUqcj8i3evM3gKlQurZ6pRLb7ElAj2xYBSR2Q4fw5LNs3kPIcj0nXMpZgv0L4n2DEvbGyTlWK5F1mEZgkUTZM2cPARvCVWIoaox3X2RfeN0XyFmgcC4pigbS28gceNwp4RN0YLhsFwYgrRcSZLcz1QYyn_J_lDMybOwxgANc97G33DADtVLOwmPN7y599_KHZq6Ilac0LXytHkBupE3CLAfAitD5Smb5c1gZ0MT5lZGepPwiBdidyyt3Ye8_RapsTj1u-1WgScP4c5IWW089pJ5YXH3h_Kt4DvKjYapHewU1Q.AsDK7Dh3okBnlQefDNMY4A.-8F4B65q9lLCKZ0T9Ap22ZpyVs7gOWMJRmRh8e90ZBZv0tFjc_mU64r5XYHdYieaKuhn24oQSh49jz0VyOp6NMSmVI4Pl2I2WaRJ7dMoFKOmP6NI5gezHkvvn3oocdUwAp-sU09vSQl76V6lsbUVFy_4j2vo8voNLbkpBpXToLFOI4f8Hm7_azT9Z9QspeBtoqTGkhQGH1a6U6TOzSjI1aZ7kzsG4Hgd1-NvpQWn3i7AFq6D15VzJK8n3BTTydYNmh2T6Mz1bPEMEi8FKFa0YT7is52z7ZL11kn6TgOuv0Avc8t4egB7k02A6QaCU7BJI_fPJq8yRRq9TyDW-8O6d0eghCVj-O_cz3kx4Pt_DI5-1ZEGe9XJZTyGc-wF14XhNtOIWKOA9j5J2e9N9AcNqd0ZtupsnWnLDPfcpTKBRWKfCdauYU692b5u9KfCppcFaLcyc2PC6faV5XVNPHkj_fhMOdpgbsUukzpLOYLTsmZbsCLu0jRYGzKXkyvIL4Z-0QDj6XdQXf1KgW3Ox31k84Kr7S3BFh-A2GhyxshUbs6qopUDirbi6DrinP4jwwv7lbig384sk86KjR65vaDKsejM4snWWzAHjnk2eElhiCphPkfSPEKaYszhYFfKAC_lgka-1KaWEpGUsuuUQ2IPCtMvcxZiyEOQsBc1bkyU1gPDeTZq4OBXzxwaMI3-p0ismEpqQMXsqWpL-2ToqrgjKk2yQz8IwWKccms1JaIDfyQxkdsLhHNHzDZIcZur-SY2c1xr1Wcupe51QUELWHtkrYPIrNBCSm3gsp02oMsBbjXG-qQMdphsSgPb3tzod21--hG_Dpp-th7C4ZyxwgOzbg_XlCtOXpj5IzLna8yqvjJ7q6ljhoYfrUvwaCmVwcMKerEsNHHZZghkI6WfxEKb0m9o3LWQtFejvmPtL15uZSo.137g3rs6XOlOVpIA8BnsfQ
+eyJhbGciOiJSU0EtT0FFUCIsImVuYyI6IkExMjhDQkMtSFMyNTYiLCJ6aXAiOiJERUYiLCJ4NXQiOiJxcEQtU2ZoOUg3NFFHOXlMN1hSZXJ5RmZvbk0iLCJjdHkiOiJKV1QifQ.TTnQy_19itGWBIdCau923_FIROcg5VQQPWMzn3ElpXH8Uy24EowVJYxoblU-s6b4sMzTjqMSz220SNF-8_eXz4FxhzkidoP0oVaKh0p7mtHn409kiIG63xIsIuOe6Opn9BjvbYRc_xpEpMjZm8DZ7M5kmplIn0xrSE2hFROy4gxiC3uTcRSAu6sKCUUlSwzfM5j2UXAptYMlXMiNmk53Tqopy0DQrYzB5XPL0Lo2akKTOe_IOgbGcffWlo5XRw3vTGiy4FxBs7ECuvFbTdAwtK-Py1IbF3xbsB2Rto3SMHMPdwW-Ee5JagnOrfOoobKlEKVgsyRBYox-tbwIoyjImg.rsBWXykOdfmZCP6VRmrZFQ.qX89Drurydc9HXZSY-ns5S_8ikL1tY-_i7wi5rbI_PItr8KCqXXDHXJe6ZhGem8pMdw5p9ni6snDmmiQ-LXJn0lP8VGNytsKgL5gLzRaRq4b6ZpsZljlMDeR16fLSjCDYVXgMygkCsdck0DSmExquhMp9Gawn5nvE-AbX1stlapdj70wxHEKZh7cwYJ9We7f3kJGehl61VBRHsqnJkUGWLuCu0EUJ5B2U98Xbi-5Mr8eWcSXn7snQQoG6KkrgCg1gMc2U5ix5OUU43rsiGaO6FxTxFXJtpsIMuFBBakM3dgns9G2naPs1tff64biVFKSX0TobeUI_FHNabJcEsXHz7hZbI1QAyg5tXpZBzSNTYPq37bifOlhYWafgHqc0WhjHuKvdvEEgbNzK3yjXnXEePIGbRuvrguNo53s6bMyrhn2b5kERKZsV9vcWQE2nsxbZtayQsViBNd06Vb4aItDvam-xb3hGhmdh40fjLFOQZd3kiSBWlo-1CGVir0Nfq3LfdptbAXAyDAgNC9Ru5OYTTgDYrSYTX1nfJxn1WSMZjoomawK_w1heAQtI_jRrS_GwKo2OWemuFcW3L2S9hXUGycY1Djm89aDNN0VgX6a2hUMilb99K4Qg3PCaT2O4ZCsuhcfFhARuOBO39vhE3bfsIRUhm8IZVWdg62cADS7o1ZK1orUZNnQyFwk_8bMlJ5EhEw68lrgNgc8JVpA16JXRCdrwl4WShSwilMjiEzspuvflcqeX8zkgrROmopgWaN_1oxmqKznvzWK37ZKogxVY4a9kyXuyHQyC89c_v8qLlWehsROHYgQSxAJ4UaTbuYMJMmAFPtyZNo2HPpY1ozrCRMdz_0932cKtmmpuM6qrsL_frxtFtgB5nds2QJmKtIk2_DcnLA-wWcZmECx_kafCQ.9Bs4ApCSZsOepTg6_WAoMA
+eyJhbGciOiJSU0EtT0FFUCIsImVuYyI6IkExMjhDQkMtSFMyNTYiLCJ6aXAiOiJERUYiLCJ4NXQiOiJxcEQtU2ZoOUg3NFFHOXlMN1hSZXJ5RmZvbk0iLCJjdHkiOiJKV1QifQ.VPVZ-ttygbwOQg8sF1eAUYhXW5WPiyQ8B3GxSRgpTANYmg7vjn7shXT3MZa6o1IXPfdAknV4a_jet3LwUrHnYsqeqkWwDTC6kHik6i-zZh36MThd_AnwotdSKLQF3BwEQs-Tic942J9du1o7gI1Z1-Nh9XJx3VpKD8xW5lW_Uu2yWU1CmX4GIKl8GZnR6SVQNHwu1TRg6SkmzT_Dh6ra3SY7fBNpQzqSQ1n1ZT4dskcsJhXIqRbl6T313TA5pL67hdbSifs7-e8QLoQg3MW_sCCABCvX6fqF0QLF7T-q86NXA6bii_wMvwXphlVnZUmxPQ1ZNpNzlI1v_KlfOGncPQ.t2D_M69aDHZ1D7CjgOn-nA.BrOXE4408o0vfG-mIHuEuaBMVtVW4HqMlKWWiQV_vwSDx3NMZEIMs0xZ8OMhUlQfQiRTXPanlCLCtgDXhJfIHa7wmn4g7dMqcYHudsE2zYOBpjbp1DzDPprZd7YuQPF6GLEjBpQ-K8DizFjH9_tOfIuYLGWiniJ6E9jD1Tdt1KrZHQm03aIVAtXFLtXvjcoA1Ers5BM92d3FgX6murlTu_-2fxIjdzvTU5W49Cpf_1i1wTHQObvXFQ97Abfg4v6i1l9PI9IfDttH5qMazPhEui5L6GqrMBCcN5xs7wSAsBtoxMC5EqnEIczi9zAgzq-3mC5mZYUWyZ3DAUhRPE7tXDOg3P1bGqWeZyPNQw8nSXhHz9OfmfOe-3o3Xc_5a_J58t5CpP_jzuV9A_oo9dseaE4BaOaVxi5ieAS61tcm159uMoDZm3We2f20F_N-K0nQfWOp5Oi-YEtAC3cJTH5ibZ_eeqtqBMjOOl-WfifpUEkNKSH-o9jtb6CArSOrMHAcRG9X3hziDapkxyE1Aht8dsdgirb25Vg9CwI823xpcUUX1_gj3y6CMgyqzcYjLvzVY_AaB1I_fjkzLwNY3WkBFfGc8XBttrsCstU_0ioFBMrg2RjYeb8qh2ywjkSdZJ_h-8j2D8glazK74v-a0MrttBVNq9a6j5psJwhvz8YiDItpk-FHv14Qplxsh-VpzqhSlokuHAD61bPgRQ2RETlpRQVmPzVcvrQZJ_j0yX3cZ7yrqwCAPq3wnRlgB3zzEPR0WqsS1o7fdDhB6ofJg-ofPVuPzqVCf97v7ecmwHbAhjhC8NCPy6GcMsZX2gFBTpgIyeX954611gP_l-GC7VH3GJs-JJ5PDHLwQ4PnkeF8rgkCeYO4MZ69gOJADShH-F9Ll5uWPMyWVIQqPP30eYwBSz_NSb2EuYzA1BfQo6d4d3o.kiZNgKl3IX6o15FMFGqv0A
+eyJhbGciOiJSU0EtT0FFUCIsImVuYyI6IkExMjhDQkMtSFMyNTYiLCJ6aXAiOiJERUYiLCJ4NXQiOiJxcEQtU2ZoOUg3NFFHOXlMN1hSZXJ5RmZvbk0iLCJjdHkiOiJKV1QifQ.Bq3YNemyw_-KIdjKrD-DQduXrNy3BPF-A3k6QjP6Zrf3phXQRUt8vXXZV-Pf9OpI2igJwSt2imR8tMg1Du_5iCqBDNgbBHmC7ZUoyYiCowaUldTsNkemVwMHPBPCoTZlGB9-r0GNZvz1fLbkMIkvQlx0uhF2tTal_QFLahYxos9lJ8lWoadfid72WvE61Q7mtxCC_fl5ZI8R6tNwMhI0tJJlRnFPssLFNP1NALJdY0Fdt35DkvYHn7JvHQ6Idjfn8sELLIYYMj1C5lLhgndn-oXG8cmnJ1HuZD9PG0_Ck068pw2NxVF718kcyN0pI3a34Kq5q3mpHBPHgX_w8BBopQ.AG--5Hl_HhXZV5hjT0Ex-Q.ft14moVbZTcGmEMRyftzJ7ot-5zZ3AGhW7HTNk0lY3oS6BrEFU9eYb-F2P8od4trqRIsoKgfrsRqt6b4Nf_ww5QeLJ8kz0-Lb1RDI6vnxJMNimCStxfEWYxAp_gUf0_YMWmbvWc4o2aF3TFuXm-Y2oMIaEQFIyvm4WV_EyyRRSEKcs4uNNQEr5GnLZbKNc9jh59QYFVCVpVEJF5MK__EMZ_BRZSb-nPyhkBKxqcXDE6gzJ3nePet17UmRdGhZ62YtNQR0675jRfAtjDpwYrZQwikIzwJV8fatoFNny9tBWtCyG_woFCg8Ko-iHGJMmQvrVOHldTstPD_gF1qvTSCzSlmn7C3lyZEbiaqPZaufEollPjRRFzKLGPXxnHTo0gZ04AS6JrSy3fUDjfOTJYKM_8S6X0PJqJgUdpSjdIXlikWE1MBglpWkVHauGQ7wJBwMa38UVKMalnQ43pDhfsgX2nFM_BU10HBfDJkTpJAmNgL06qnXsgA8HIyuwRHRV8R2sUdW3-4bnNuUkFQOYVr4qGofgbfD7jKBAiLzxC5VX62E2I388qqVfmJkgBXLAWRf6e7jkO4SWqBBBVfzbcQowF_zdIfv41sYKn__xVDPEw40ibbVhWQE_Yrib378DS7F2SC4wLbUTybopPlHEWyF7RrWLkepIqKVS29sDuSwntMcy5GjTup6h2kZk03_Kj5hlqQ-RSrd3wtuHFpsu2BF_dczTXqMSoZx5XPKFSaAU8-7Kks7Q7uB8zlGfxKdMFW0y39yAAjWtFORZLu7trgK5m4k-VkR9j-xUw7MQ_ECC9SShIg6yObyNNjt4BJMfk75dx2iTHliAnhHo0GRW5zWq0V6_L-XTjboZh1Kv4Pn2XkJjZku_1ZUyVaARPR0hnWRBtsF-vQ1-Z2iNAayl8CdVg7tlkzZHYd6y95sH4xnAU.CWodGI6COc-LDSHn9rcnHw

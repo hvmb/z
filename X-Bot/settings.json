@@ -1,0 +1,19 @@
+{
+    "Application": {
+        "Stats updater delay": 120,
+        "Test mode": false
+    },
+
+    "Bot": {
+	"Token": "",
+        "Prefix": "x."
+    },
+
+    "Reserve": {
+        "Max sessions": 2,
+        "Max attempts": 100,
+        "Delay": 0.5
+    },
+
+    "Xbox account (Format: Email|Password)": "fgsjsr7kydtyk6@outlook.com|Pass2020"
+}
